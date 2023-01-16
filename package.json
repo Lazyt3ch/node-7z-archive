@@ -81,6 +81,7 @@
     "node-sys": "^1.2.2",
     "node-unar": "^1.0.8",
     "node-wget-fetch": "^1.1.3",
+    "q": "^1.5.1",
     "when": "^3.7.8"
   },
   "optionalDependencies": {
