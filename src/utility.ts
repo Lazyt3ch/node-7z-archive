@@ -43,6 +43,58 @@ export const ReplaceNativeSeparator = function (path: string): string {
     return path.replace(new RegExp(`\\${nativeSeparator}`, 'g'), '/');
 };
 
+type SwitchesType = {
+    files?: string[],
+}
+
+function getArgs(command: string, switches: SwitchesType): string[] {
+    let args = [command.split(' ')[0]];
+    // Parse and add command (non-switches parameters) to `args`.
+    const regexpCommands = /"((?:\\.|[^"\\])*)"/g;
+    const cmds = command.match(regexpCommands) || [];
+    for (const cmd of cmds) {
+        const arg = cmd.replace(/(\/|\\)/g, sep);
+        args.push(normalize(arg));
+    }
+
+    // Special treatment for the output switch because it is exposed as a
+    // parameter in the API and not as a option. Plus wildcards can be passed.
+    const regexpOutput = /-o"((?:\\.|[^"\\])*)"/g;
+    const output = command.match(regexpOutput);
+
+    if (output) {
+        args.pop();
+        const arg = output[0].replace(/(\/|\\|")/g, (match) => match === '"' ? '' : sep);
+        args.push(normalize(arg));
+    }
+
+    if (switches.files) {
+        const files = switches.files;
+        delete switches.files;
+        const filesArray = Array.isArray(files) ? files : [files];
+        args = [...args, ...filesArray, '-r', '-aoa'];
+    }
+
+    // Add switches to the `args` array.
+    let switchesArray = Switches(switches);
+    args = [...args, ...switchesArray];
+
+    // Remove double quotes. If present in the spawned process, 7-Zip will
+    // read them as part of the path (e.g.: create a `"archive.7z"` with
+    // quotes in the file-name);
+    args.forEach(function (arg, i) {
+        if (!isString(arg)) return;
+        const doubleQuotesMatch = arg.match(/^\"(.+)\"$/);
+        if (doubleQuotesMatch) {
+            args[i] = doubleQuotesMatch[1];
+        }
+    });
+    // Add bb2 to args array so we get file info
+    args.push('-bb2');
+
+    return args;
+}
+
 /**
  * @param {string} binary which binary to use.
  * @param {string} command The command to run.
@@ -60,7 +112,7 @@ export function Run(
     command: string | null = null,
     switches: { files?: string[] } = {},
     override: boolean = false
-) {
+) {  
     return when.promise<string[]>(function (
         fulfill: (arg0: string[]) => void,
         reject: (arg0: Error) => void,
@@ -76,50 +128,8 @@ export function Run(
         // add platform binary to command
         let sevenBinary = Binary(override, binary);
         let cmd = sevenBinary.filepath;
-        let args = [command.split(' ')[0]];
-        // Parse and add command (non-switches parameters) to `args`.
-        let regexpCommands = /"((?:\\.|[^"\\])*)"/g;
-        let commands = command.match(regexpCommands) || [];
-        for (command of commands) {
-            const arg = command.replace(/(\/|\\)/g, sep);
-            args.push(normalize(arg));
-        }
+        const args = getArgs(command, switches);
 
-        // Special treatment for the output switch because it is exposed as a
-        // parameter in the API and not as a option. Plus wildcards can be passed.
-        let regexpOutput = /-o"((?:\\.|[^"\\])*)"/g;
-        let output = command.match(regexpOutput);
-
-        if (output) {
-            args.pop();
-            const arg = output[0].replace(/(\/|\\|")/g, (match) => match === '"' ? '' : sep);
-            args.push(normalize(arg));
-        }
-
-        if (switches.files) {
-            const files = switches.files;
-            delete switches.files;
-
-            const filesArray = Array.isArray(files) ? files : [files];
-            args = [...args, ...filesArray, '-r', '-aoa'];
-        }
-
-        // Add switches to the `args` array.
-        let switchesArray = Switches(switches);
-        args = [...args, ...switchesArray];
-
-        // Remove double quotes. If present in the spawned process, 7-Zip will
-        // read them as part of the path (e.g.: create a `"archive.7z"` with
-        // quotes in the file-name);
-        args.forEach(function (arg, i) {
-            if (!isString(arg)) return;
-            const doubleQuotesMatch = arg.match(/^\"(.+)\"$/);
-            if (doubleQuotesMatch) {
-                args[i] = doubleQuotesMatch[1];
-            }
-        });
-        // Add bb2 to args array so we get file info
-        args.push('-bb2');
         // When an stdout is emitted, parse it. If an error is detected in the body
         // of the stdout create an new error with the 7-Zip error message as the
         // error's message. Otherwise progress with stdout message.
